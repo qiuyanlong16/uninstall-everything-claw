@@ -1,0 +1,22 @@
+use crate::models::ScannedApp;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as platform;
+
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+use windows as platform;
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as platform;
+
+/// Scan the system for installed AI coding agents.
+/// Returns a list of discovered applications.
+pub fn scan_all() -> Vec<ScannedApp> {
+    platform::scan()
+}
