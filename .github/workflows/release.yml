@@ -7,6 +7,11 @@ on:
         description: 'Release version (e.g. v0.1.0)'
         required: true
         type: string
+      platforms:
+        description: 'Select platforms to build'
+        required: false
+        type: string
+        default: 'linux,windows,macos'
 
 jobs:
   build:
@@ -31,6 +36,15 @@ jobs:
             ext: dmg
 
     steps:
+      - name: Check if this platform should build
+        run: |
+          platforms="${{ github.event.inputs.platforms || 'linux,windows,macos' }}"
+          if ! echo "$platforms" | tr ',' '\n' | grep -qx "${{ matrix.target }}"; then
+            echo "Skipping ${{ matrix.target }} - not selected"
+            exit 78  # GitHub Actions code 78 = skip job
+          fi
+          echo "Building ${{ matrix.target }}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -164,3 +178,4 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          fail_on_unmatched_files: false
