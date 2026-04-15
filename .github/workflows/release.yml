@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            artifact: claw-sweeper-linux
+            ext: zip
+          - os: windows-latest
+            target: windows
+            artifact: claw-sweeper-windows
+            ext: zip
+          - os: macos-latest
+            target: macos
+            artifact: claw-sweeper-macos
+            ext: dmg
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.0'
+          cache: true
+
+      # ── Linux dependencies ──
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev
+
+      # ── Build Rust core library ──
+      - name: Build Rust core (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd native/claw-sweeper-core
+          cargo build --release
+          cp target/release/libclaw_sweeper_core.so \
+            ../../build/linux/x64/release/bundle/ 2>/dev/null || true
+
+      - name: Build Rust core (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd native/claw-sweeper-core
+          cargo build --release
+          # Copy DLL to Flutter build output (path created after flutter build)
+
+      - name: Build Rust core (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd native/claw-sweeper-core
+          cargo build --release
+          cp target/release/libclaw_sweeper_core.dylib \
+            ../../build/macos/Build/Products/Release/claw_sweeper.app/Contents/MacOS/ 2>/dev/null || true
+
+      # ── Build Flutter app ──
+      - name: Build Flutter app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: flutter build linux --release
+
+      - name: Build Flutter app (Windows)
+        if: matrix.os == 'windows-latest'
+        run: flutter build windows --release
+
+      - name: Build Flutter app (macOS)
+        if: matrix.os == 'macos-latest'
+        run: flutter build macos --release
+
+      # ── Copy Rust library into Flutter build output ──
+      - name: Copy native lib into build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cp native/claw-sweeper-core/target/release/libclaw_sweeper_core.so \
+            build/linux/x64/release/bundle/
+
+      - name: Copy native lib into build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Copy-Item native/claw-sweeper-core/target/release/claw_sweeper_core.dll `
+            build/windows/x64/runner/Release/
+
+      - name: Copy native lib into build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cp native/claw-sweeper-core/target/release/libclaw_sweeper_core.dylib \
+            build/macos/Build/Products/Release/claw_sweeper.app/Contents/MacOS/
+
+      # ── Package artifacts ──
+      - name: Package Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd build/linux/x64/release/bundle
+          zip -r ../../../../../${{ matrix.artifact }}.${{ matrix.ext }} .
+
+      - name: Package Windows artifact
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath ${{ matrix.artifact }}.${{ matrix.ext }}
+
+      - name: Package macOS artifact
+        if: matrix.os == 'macos-latest'
+        run: |
+          hdiutil create -volname "ClawSweeper" \
+            -srcfolder build/macos/Build/Products/Release/claw_sweeper.app \
+            -ov -format UDZO ${{ matrix.artifact }}.${{ matrix.ext }}
+
+      # ── Upload to workflow artifacts ──
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.${{ matrix.ext }}
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact directory
+        run: |
+          mkdir -p release-assets
+          for dir in artifacts/*/; do
+            cp "$dir"* release-assets/ 2>/dev/null || true
+          done
+          ls -la release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
